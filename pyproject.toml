@@ -1,0 +1,32 @@
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
+[project]
+name = "m365-mcp"
+version = "0.1.0"
+description = "A local MCP server that lets Claude work with your Outlook mail, OneDrive and SharePoint through Microsoft Graph."
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+requires-python = ">=3.10"
+dependencies = [
+    "mcp>=2.3,<3",
+    "msal>=1.31,<2",
+    "msal-extensions>=1.2,<2",
+    "httpx>=0.27,<1",
+    "pypdf>=5,<7",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "pytest-asyncio>=0.24", "respx>=0.21"]
+
+[project.scripts]
+m365-mcp = "m365_mcp.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/m365_mcp"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
