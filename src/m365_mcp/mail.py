@@ -114,16 +114,17 @@ async def search(
             kql.append("isread:false")
         params["$search"] = '"' + " ".join(kql).replace('"', "'") + '"'
     else:
-        filters = []
+        # Graph rejects $filter + $orderby as "InefficientFilter" unless the sort property
+        # (receivedDateTime) is filtered on first, so it always leads the filter.
+        since = f"{received_after[:10]}T00:00:00Z" if received_after else "1900-01-01T00:00:00Z"
+        filters = [f"receivedDateTime ge {since}"]
         if from_address:
             filters.append(f"from/emailAddress/address eq '{from_address.replace(chr(39), chr(39) * 2)}'")
-        if received_after:
-            filters.append(f"receivedDateTime ge {received_after[:10]}T00:00:00Z")
         if has_attachments is not None:
             filters.append(f"hasAttachments eq {'true' if has_attachments else 'false'}")
         if unread_only:
             filters.append("isRead eq false")
-        if filters:
+        if len(filters) > 1 or received_after:
             params["$filter"] = " and ".join(filters)
         params["$orderby"] = "receivedDateTime desc"
     msgs = await graph.get_all(base, params=params, limit=limit)
