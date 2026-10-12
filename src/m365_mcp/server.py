@@ -10,7 +10,7 @@ from mcp_types import ToolAnnotations
 from pydantic import BaseModel, Field
 
 from . import config as config_mod
-from . import excel, files, localfs, mail
+from . import excel, files, localfs, logs, mail
 from .auth import NotSignedIn, TokenProvider
 from .graph import Graph, GraphError
 
@@ -33,6 +33,7 @@ OVERWRITE = ToolAnnotations(readOnlyHint=False, destructiveHint=True, openWorldH
 SEND = ToolAnnotations(readOnlyHint=False, destructiveHint=True, idempotentHint=False, openWorldHint=True)
 
 server = MCPServer(name="m365-mcp", instructions=INSTRUCTIONS)
+logs.install()
 cfg = config_mod.load()
 _graph: Graph | None = None
 
@@ -344,5 +345,39 @@ async def excel_append_rows(
     return await guard(excel.append_rows(graph(), drive, path, values, sheet, table, backup))
 
 
+# ================================================================ which tools to offer
+
+TOOL_GROUPS = {
+    "mail": ["search_mail", "read_email", "list_mail_folders", "create_mail_folder", "save_email_attachments",
+             "save_email", "move_emails", "mark_emails"],
+    "drafts": ["create_draft", "send_drafts"],
+    "files": ["find_sharepoint_sites", "list_libraries", "list_folder", "search_files", "read_file",
+              "download_file", "upload_file", "write_text_file", "create_folder", "move_or_rename", "copy_file"],
+    "excel": ["excel_list_sheets", "excel_read", "excel_write", "excel_append_rows"],
+}
+
+
+def hidden_tools(settings: config_mod.Config, tools: dict[str, ToolAnnotations | None]) -> set[str]:
+    """Names of the tools the settings switch off. `tools` maps each tool name
+    to its annotations; in read-only mode anything not marked read-only goes."""
+    hidden = {name for group, names in TOOL_GROUPS.items() if group not in settings.tool_groups for name in names}
+    if settings.read_only:
+        hidden |= {name for name, ann in tools.items() if not (ann and ann.read_only_hint)}
+    return hidden & set(tools)
+
+
+def registered_tools() -> dict[str, ToolAnnotations | None]:
+    return {t.name: t.annotations for t in server._tool_manager.list_tools()}
+
+
+def _apply_settings() -> None:
+    for name in hidden_tools(cfg, registered_tools()):
+        server.remove_tool(name)
+
+
+_apply_settings()
+
+
 def run() -> None:
+    logs.install()
     server.run()

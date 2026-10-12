@@ -83,13 +83,23 @@ read-only ones, but leave `send_drafts` on "Ask every time".
 m365-mcp configure --local-dir ~/Downloads --local-dir ~/Documents/Invoices   # folders it may use on this computer
 m365-mcp configure --signature ~/signature.html                               # added to new drafts
 m365-mcp configure --send-mode disabled                                        # drafts only, never send
+m365-mcp configure --read-only                                                 # look but don't touch (--no-read-only to undo)
+m365-mcp configure --tools mail,drafts                                         # only offer some groups of tools
 m365-mcp status                                                                # show settings and who's signed in
 m365-mcp logout                                                                # sign out and delete the saved sign-in
 ```
 
 The same settings can come from environment variables: `M365_MCP_CLIENT_ID`, `M365_MCP_TENANT_ID`,
-`M365_MCP_LOCAL_DIRS` (separated by `:` on macOS/Linux, `;` on Windows), `M365_MCP_SIGNATURE_HTML`
-and `M365_MCP_SEND_MODE`.
+`M365_MCP_LOCAL_DIRS` (separated by `:` on macOS/Linux, `;` on Windows), `M365_MCP_SIGNATURE_HTML`,
+`M365_MCP_SEND_MODE`, `M365_MCP_READ_ONLY` (`true`/`false`) and `M365_MCP_TOOLS` (e.g. `mail,files`).
+
+**Read-only mode** offers only the tools that search and read: nothing can be moved, written,
+drafted or sent. **Tool groups** are `mail`, `drafts` (drafting and sending), `files` (OneDrive and
+SharePoint) and `excel`; the default is all of them. Tools that are switched off aren't shown to
+Claude at all. Restart Claude after changing either setting.
+
+Logs never contain sign-in tokens or email addresses; they're replaced with `[redacted]` and
+`[email]`, so a log is safe to share when reporting a problem.
 
 By default it may only read and write files on your computer inside `~/Downloads`. It doesn't need
 local access for OneDrive or SharePoint work.

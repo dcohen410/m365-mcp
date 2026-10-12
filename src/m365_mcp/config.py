@@ -28,6 +28,25 @@ SCOPES = [
 
 SEND_MODES = ("confirm", "disabled")
 
+# Tools come in groups that can be switched off independently.
+TOOL_GROUPS = ("mail", "drafts", "files", "excel")
+
+
+def _truthy(value: str) -> bool:
+    return value.strip().lower() in ("1", "true", "yes", "on")
+
+
+def parse_tool_groups(value: str | list[str]) -> list[str]:
+    """Turn "mail,files" (or "all") into a list of known group names."""
+    items = value.split(",") if isinstance(value, str) else value
+    names = [i.strip().lower() for i in items if i and i.strip()]
+    if not names or "all" in names:
+        return list(TOOL_GROUPS)
+    unknown = [n for n in names if n not in TOOL_GROUPS]
+    if unknown:
+        raise ValueError(f"Unknown tool group(s): {', '.join(unknown)}. Choose from: {', '.join(TOOL_GROUPS)}.")
+    return [g for g in TOOL_GROUPS if g in names]
+
 
 def config_dir() -> Path:
     override = os.environ.get(ENV_PREFIX + "CONFIG_DIR")
@@ -55,6 +74,10 @@ class Config:
     # "confirm": sending is allowed but every send is confirmed by the user.
     # "disabled": the server can only create drafts.
     send_mode: str = "confirm"
+    # Only offer tools that read, never ones that change mail or files.
+    read_only: bool = False
+    # Which groups of tools to offer (see TOOL_GROUPS).
+    tool_groups: list[str] = field(default_factory=lambda: list(TOOL_GROUPS))
 
     @property
     def authority(self) -> str:
@@ -85,6 +108,8 @@ def load() -> Config:
         local_dirs=data.get("local_dirs") or Config().local_dirs,
         signature_html=data.get("signature_html", ""),
         send_mode=data.get("send_mode", "confirm"),
+        read_only=bool(data.get("read_only", False)),
+        tool_groups=_groups_or_default(data.get("tool_groups")),
     )
 
     env = os.environ
@@ -96,7 +121,20 @@ def load() -> Config:
     cfg.send_mode = env.get(ENV_PREFIX + "SEND_MODE", cfg.send_mode)
     if cfg.send_mode not in SEND_MODES:
         cfg.send_mode = "confirm"
+    if env.get(ENV_PREFIX + "READ_ONLY"):
+        cfg.read_only = _truthy(env[ENV_PREFIX + "READ_ONLY"])
+    if env.get(ENV_PREFIX + "TOOLS"):
+        cfg.tool_groups = _groups_or_default(env[ENV_PREFIX + "TOOLS"])
     return cfg
+
+
+def _groups_or_default(value) -> list[str]:
+    # A bad value in the settings should not stop the server starting, so fall
+    # back to every group; `configure` rejects bad values before saving them.
+    try:
+        return parse_tool_groups(value or "all")
+    except ValueError:
+        return list(TOOL_GROUPS)
 
 
 def save(cfg: Config) -> Path:
@@ -110,6 +148,8 @@ def save(cfg: Config) -> Path:
                 "local_dirs": cfg.local_dirs,
                 "signature_html": cfg.signature_html,
                 "send_mode": cfg.send_mode,
+                "read_only": cfg.read_only,
+                "tool_groups": cfg.tool_groups,
             },
             indent=2,
         ),
