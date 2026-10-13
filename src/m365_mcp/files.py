@@ -193,3 +193,40 @@ async def copy_item(
     data = await graph.get_bytes(f"{ref}/content")
     target_drive = destination_drive if destination_drive is not None else drive
     return await upload_bytes(graph, target_drive, destination_folder, new_name or item["name"], data)
+
+
+MAX_DELETE = 25
+
+
+async def items_for_deletion(graph: Graph, drive: str | None, paths: list[str]) -> list[tuple[str, dict]]:
+    """Look up the files to delete. Folders are refused so one call can't remove a whole tree."""
+    if not paths:
+        raise ValueError("Give at least one file path.")
+    if len(paths) > MAX_DELETE:
+        raise ValueError(f"Delete at most {MAX_DELETE} files at a time.")
+    found = []
+    for path in paths:
+        ref, item = await drives.get_item(graph, drive, path)
+        if "folder" in item:
+            raise ValueError(f"'{path}' is a folder. Only files can be deleted here; delete folders in OneDrive or SharePoint.")
+        found.append((ref, item))
+    return found
+
+
+def describe_for_deletion(items: list[tuple[str, dict]]) -> str:
+    lines = [f"Delete {len(items)} file{'s' if len(items) != 1 else ''}? They go to the recycle bin and can be restored."]
+    for _, item in items:
+        folder = (item.get("parentReference") or {}).get("path", "").split("root:", 1)[-1] or "/"
+        lines.append(f"• {item.get('name')}  (in {folder}, {item.get('size', 0):,} bytes)")
+    return "\n".join(lines)
+
+
+async def delete_items(graph: Graph, items: list[tuple[str, dict]]) -> list[dict]:
+    results = []
+    for ref, item in items:
+        try:
+            await graph.delete(ref)
+            results.append({"name": item.get("name"), "deleted": True})
+        except GraphError as exc:
+            results.append({"name": item.get("name"), "deleted": False, "error": str(exc)})
+    return results

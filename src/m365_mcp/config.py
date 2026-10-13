@@ -27,6 +27,7 @@ SCOPES = [
 ]
 
 SEND_MODES = ("confirm", "disabled")
+DELETE_MODES = ("confirm", "disabled")
 
 # Tools come in groups that can be switched off independently.
 TOOL_GROUPS = ("mail", "drafts", "files", "excel")
@@ -78,6 +79,9 @@ class Config:
     read_only: bool = False
     # Which groups of tools to offer (see TOOL_GROUPS).
     tool_groups: list[str] = field(default_factory=lambda: list(TOOL_GROUPS))
+    # "confirm": files can be deleted (to the recycle bin), confirmed by the user each time.
+    # "disabled": no deleting.
+    delete_mode: str = "confirm"
 
     @property
     def authority(self) -> str:
@@ -110,6 +114,7 @@ def load() -> Config:
         send_mode=data.get("send_mode", "confirm"),
         read_only=bool(data.get("read_only", False)),
         tool_groups=_groups_or_default(data.get("tool_groups")),
+        delete_mode=data.get("delete_mode", "confirm"),
     )
 
     env = os.environ
@@ -125,6 +130,9 @@ def load() -> Config:
         cfg.read_only = _truthy(env[ENV_PREFIX + "READ_ONLY"])
     if env.get(ENV_PREFIX + "TOOLS"):
         cfg.tool_groups = _groups_or_default(env[ENV_PREFIX + "TOOLS"])
+    cfg.delete_mode = env.get(ENV_PREFIX + "DELETE_MODE", cfg.delete_mode)
+    if cfg.delete_mode not in DELETE_MODES:
+        cfg.delete_mode = "disabled"
     return cfg
 
 
@@ -150,6 +158,7 @@ def save(cfg: Config) -> Path:
                 "send_mode": cfg.send_mode,
                 "read_only": cfg.read_only,
                 "tool_groups": cfg.tool_groups,
+                "delete_mode": cfg.delete_mode,
             },
             indent=2,
         ),

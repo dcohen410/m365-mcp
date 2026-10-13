@@ -17,8 +17,10 @@ It's built to fill the gaps in typical Microsoft 365 connectors:
 
 ## What it won't do
 
-- **Delete anything.** There are no delete tools for mail or files, and it won't move mail to
-  Deleted Items or Junk.
+- **Delete mail.** There are no tools that delete email, and it won't move mail to Deleted Items or
+  Junk.
+- **Delete files without asking.** `delete_files` sends files (never folders) to the recycle bin, and
+  you confirm every deletion. Turn it off with `m365-mcp configure --delete-mode disabled`.
 - **Overwrite files silently.** Name clashes get a new name unless you ask to overwrite, and
   OneDrive/SharePoint keep the old version in version history.
 - **Send without asking.** Email is drafted by default. When you ask Claude to send, you're shown
@@ -75,7 +77,7 @@ claude mcp add m365 -- m365-mcp serve
 ```
 
 Claude asks your permission before using each tool. You can choose "Always allow" for the
-read-only ones, but leave `send_drafts` on "Ask every time".
+read-only ones, but leave `send_drafts` and `delete_files` on "Ask every time".
 
 ## Options
 
@@ -117,7 +119,7 @@ local access for OneDrive or SharePoint work.
 | Area | Tools |
 |---|---|
 | Mail | `search_mail`, `read_email`, `list_mail_folders`, `create_mail_folder`, `save_email_attachments`, `save_email`, `move_emails`, `mark_emails`, `create_draft`, `send_drafts` |
-| Files | `find_sharepoint_sites`, `list_libraries`, `list_folder`, `search_files`, `read_file`, `download_file`, `upload_file`, `write_text_file`, `create_folder`, `move_or_rename`, `copy_file` |
+| Files | `find_sharepoint_sites`, `list_libraries`, `list_folder`, `search_files`, `read_file`, `download_file`, `upload_file`, `write_text_file`, `create_folder`, `move_or_rename`, `copy_file`, `delete_files` |
 | Excel | `excel_list_sheets`, `excel_read`, `excel_write`, `excel_append_rows` |
 
 A note on safety: emails are written by other people, and a message could contain text that tries to

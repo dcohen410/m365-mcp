@@ -30,6 +30,8 @@ def _configure(args: argparse.Namespace) -> int:
         except ValueError as exc:
             print(exc, file=sys.stderr)
             return 1
+    if args.delete_mode:
+        cfg.delete_mode = args.delete_mode
     path = config_mod.save(cfg)
     print(f"Saved settings to {path}")
     if not cfg.is_configured():
@@ -62,6 +64,7 @@ def _status(_: argparse.Namespace) -> int:
     print(f"Sending:        {cfg.send_mode}")
     print(f"Read-only:      {'yes' if cfg.read_only else 'no'}")
     print(f"Tool groups:    {', '.join(cfg.tool_groups)}")
+    print(f"Deleting files: {cfg.delete_mode}")
     if cfg.is_configured():
         print(f"Signed in as:   {auth.signed_in_user(cfg) or '(not signed in; run m365-mcp login)'}")
     return 0
@@ -91,6 +94,9 @@ def main(argv: list[str] | None = None) -> int:
                    help="only offer tools that read; nothing can be moved, written, drafted or sent")
     p.add_argument("--tools", help=f"comma-separated tool groups to offer: {', '.join(config_mod.TOOL_GROUPS)} "
                                    "or 'all' (default all)")
+    p.add_argument("--delete-mode", choices=config_mod.DELETE_MODES,
+                   help="'confirm' (default): deleting files to the recycle bin allowed with confirmation; "
+                        "'disabled': no deleting")
     p.set_defaults(func=_configure)
 
     p = sub.add_parser("login", help="sign in to Microsoft 365 in your browser")
