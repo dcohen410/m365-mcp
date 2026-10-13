@@ -31,6 +31,8 @@ It prints the **Client ID** and **Tenant ID**, and grants admin consent if you'r
    - `Mail.Send`
    - `Files.ReadWrite.All`
    - `Sites.ReadWrite.All`
+   - `Calendars.ReadWrite`
+   - `MailboxSettings.Read`
 6. Click **Grant admin consent for <your organisation>** and confirm. (If you're not an admin, send
    an admin this link: `https://login.microsoftonline.com/<tenant-id>/adminconsent?client_id=<client-id>`.)
 7. From the app's **Overview** page, copy the **Application (client) ID** and **Directory (tenant) ID**.
@@ -48,7 +50,7 @@ Claude:
 > Follow Option B in https://github.com/dcohen410/m365-mcp/blob/main/docs/entra-setup.md exactly:
 > single-tenant, public client redirect URI `http://localhost`, "Allow public client flows" set to Yes,
 > and only these delegated Microsoft Graph permissions: User.Read, Mail.ReadWrite, Mail.Send,
-> Files.ReadWrite.All, Sites.ReadWrite.All. Don't create a client secret or add application
+> Files.ReadWrite.All, Sites.ReadWrite.All, Calendars.ReadWrite, MailboxSettings.Read. Don't create a client secret or add application
 > permissions. Before clicking "Grant admin consent", show me the permission list and wait for my OK.
 > When you're done, tell me the Application (client) ID and Directory (tenant) ID.
 
@@ -61,9 +63,17 @@ Claude:
 | `Mail.Send` | Sending a draft, only after the user confirms |
 | `Files.ReadWrite.All` | Reading and writing files in OneDrive and in libraries shared with you |
 | `Sites.ReadWrite.All` | Finding SharePoint sites and working in their document libraries |
+| `Calendars.ReadWrite` | Listing, adding and changing events on your own calendar |
+| `MailboxSettings.Read` | Reading your Outlook time zone, so event times match what Outlook shows |
 
 All are delegated: Microsoft only lets the app reach mailboxes, files and sites the signed-in person
 already has access to.
+
+## Adding calendar access to an existing registration
+
+If your app registration was set up before the calendar tools, add the `Calendars.ReadWrite` and
+`MailboxSettings.Read` delegated permissions to it (step 5 above), grant admin consent again, then
+run `m365-mcp login` once so your sign-in picks them up.
 
 ## Restricting who can use it (optional)
 

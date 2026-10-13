@@ -11,7 +11,7 @@ set -euo pipefail
 
 APP_NAME="${1:-m365-mcp}"
 GRAPH_API="00000003-0000-0000-c000-000000000000"
-SCOPES=(User.Read Mail.ReadWrite Mail.Send Files.ReadWrite.All Sites.ReadWrite.All)
+SCOPES=(User.Read Mail.ReadWrite Mail.Send Files.ReadWrite.All Sites.ReadWrite.All Calendars.ReadWrite MailboxSettings.Read)
 
 command -v az >/dev/null || { echo "The Azure CLI (az) isn't installed. See the comment at the top of this script."; exit 1; }
 TENANT_ID=$(az account show --query tenantId -o tsv) || { echo "Run 'az login --allow-no-subscriptions' first."; exit 1; }
