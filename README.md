@@ -17,8 +17,10 @@ It's built to fill the gaps in typical Microsoft 365 connectors:
 
 ## What it won't do
 
-- **Delete anything.** There are no delete tools for mail or files, and it won't move mail to
-  Deleted Items or Junk.
+- **Delete mail.** There are no tools that delete email, and it won't move mail to Deleted Items or
+  Junk.
+- **Delete files without asking.** `delete_files` sends files (never folders) to the recycle bin, and
+  you confirm every deletion. Turn it off with `m365-mcp configure --delete-mode disabled`.
 - **Overwrite files silently.** Name clashes get a new name unless you ask to overwrite, and
   OneDrive/SharePoint keep the old version in version history.
 - **Send without asking.** Email is drafted by default. When you ask Claude to send, you're shown
@@ -75,7 +77,7 @@ claude mcp add m365 -- m365-mcp serve
 ```
 
 Claude asks your permission before using each tool. You can choose "Always allow" for the
-read-only ones, but leave `send_drafts` on "Ask every time".
+read-only ones, but leave `send_drafts` and `delete_files` on "Ask every time".
 
 ## Options
 
@@ -83,13 +85,23 @@ read-only ones, but leave `send_drafts` on "Ask every time".
 m365-mcp configure --local-dir ~/Downloads --local-dir ~/Documents/Invoices   # folders it may use on this computer
 m365-mcp configure --signature ~/signature.html                               # added to new drafts
 m365-mcp configure --send-mode disabled                                        # drafts only, never send
+m365-mcp configure --read-only                                                 # look but don't touch (--no-read-only to undo)
+m365-mcp configure --tools mail,drafts                                         # only offer some groups of tools
 m365-mcp status                                                                # show settings and who's signed in
 m365-mcp logout                                                                # sign out and delete the saved sign-in
 ```
 
 The same settings can come from environment variables: `M365_MCP_CLIENT_ID`, `M365_MCP_TENANT_ID`,
-`M365_MCP_LOCAL_DIRS` (separated by `:` on macOS/Linux, `;` on Windows), `M365_MCP_SIGNATURE_HTML`
-and `M365_MCP_SEND_MODE`.
+`M365_MCP_LOCAL_DIRS` (separated by `:` on macOS/Linux, `;` on Windows), `M365_MCP_SIGNATURE_HTML`,
+`M365_MCP_SEND_MODE`, `M365_MCP_READ_ONLY` (`true`/`false`) and `M365_MCP_TOOLS` (e.g. `mail,files`).
+
+**Read-only mode** offers only the tools that search and read: nothing can be moved, written,
+drafted or sent. **Tool groups** are `mail`, `drafts` (drafting and sending), `files` (OneDrive and
+SharePoint) and `excel`; the default is all of them. Tools that are switched off aren't shown to
+Claude at all. Restart Claude after changing either setting.
+
+Logs never contain sign-in tokens or email addresses; they're replaced with `[redacted]` and
+`[email]`, so a log is safe to share when reporting a problem.
 
 By default it may only read and write files on your computer inside `~/Downloads`. It doesn't need
 local access for OneDrive or SharePoint work.
@@ -107,7 +119,7 @@ local access for OneDrive or SharePoint work.
 | Area | Tools |
 |---|---|
 | Mail | `search_mail`, `read_email`, `list_mail_folders`, `create_mail_folder`, `save_email_attachments`, `save_email`, `move_emails`, `mark_emails`, `create_draft`, `send_drafts` |
-| Files | `find_sharepoint_sites`, `list_libraries`, `list_folder`, `search_files`, `read_file`, `download_file`, `upload_file`, `write_text_file`, `create_folder`, `move_or_rename`, `copy_file` |
+| Files | `find_sharepoint_sites`, `list_libraries`, `list_folder`, `search_files`, `read_file`, `download_file`, `upload_file`, `write_text_file`, `create_folder`, `move_or_rename`, `copy_file`, `delete_files` |
 | Excel | `excel_list_sheets`, `excel_read`, `excel_write`, `excel_append_rows` |
 
 A note on safety: emails are written by other people, and a message could contain text that tries to
