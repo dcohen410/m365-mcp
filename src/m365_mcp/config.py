@@ -17,20 +17,26 @@ ENV_PREFIX = "M365_MCP_"
 
 # Delegated Microsoft Graph permissions. The server only ever acts as the
 # signed-in person, so it can reach exactly what they can reach in Outlook,
-# OneDrive and SharePoint, and nothing more.
+# OneDrive and SharePoint, and nothing more. MailboxSettings.Read is only for
+# the mailbox's time zone, so calendar times match what Outlook shows.
 SCOPES = [
     "User.Read",
     "Mail.ReadWrite",
     "Mail.Send",
     "Files.ReadWrite.All",
     "Sites.ReadWrite.All",
+    "Calendars.ReadWrite",
+    "MailboxSettings.Read",
 ]
 
 SEND_MODES = ("confirm", "disabled")
 DELETE_MODES = ("confirm", "disabled")
 
 # Tools come in groups that can be switched off independently.
-TOOL_GROUPS = ("mail", "drafts", "files", "excel")
+TOOL_GROUPS = ("mail", "drafts", "files", "excel", "calendar")
+# Groups that existed before "calendar". A settings file that lists all of these
+# was written when they meant "everything", so newer groups are switched on too.
+_ORIGINAL_GROUPS = ("mail", "drafts", "files", "excel")
 
 
 def _truthy(value: str) -> bool:
@@ -113,7 +119,7 @@ def load() -> Config:
         signature_html=data.get("signature_html", ""),
         send_mode=data.get("send_mode", "confirm"),
         read_only=bool(data.get("read_only", False)),
-        tool_groups=_groups_or_default(data.get("tool_groups")),
+        tool_groups=_saved_groups(data.get("tool_groups")),
         delete_mode=data.get("delete_mode", "confirm"),
     )
 
@@ -143,6 +149,13 @@ def _groups_or_default(value) -> list[str]:
         return parse_tool_groups(value or "all")
     except ValueError:
         return list(TOOL_GROUPS)
+
+
+def _saved_groups(value) -> list[str]:
+    groups = _groups_or_default(value)
+    if set(_ORIGINAL_GROUPS) <= set(groups):
+        return list(TOOL_GROUPS)
+    return groups
 
 
 def save(cfg: Config) -> Path:

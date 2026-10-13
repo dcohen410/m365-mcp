@@ -7,7 +7,7 @@ param([string]$AppName = "m365-mcp")
 $ErrorActionPreference = "Stop"
 
 $GraphApi = "00000003-0000-0000-c000-000000000000"
-$Scopes = @("User.Read", "Mail.ReadWrite", "Mail.Send", "Files.ReadWrite.All", "Sites.ReadWrite.All")
+$Scopes = @("User.Read", "Mail.ReadWrite", "Mail.Send", "Files.ReadWrite.All", "Sites.ReadWrite.All", "Calendars.ReadWrite", "MailboxSettings.Read")
 
 if (-not (Get-Command az -ErrorAction SilentlyContinue)) { throw "The Azure CLI (az) isn't installed." }
 $TenantId = az account show --query tenantId -o tsv

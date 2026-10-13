@@ -1,7 +1,7 @@
 # m365-mcp
 
-A local [MCP](https://modelcontextprotocol.io) server that lets Claude work with your **Outlook mail,
-OneDrive and SharePoint** through Microsoft Graph. It runs on your own computer and signs in as you,
+A local [MCP](https://modelcontextprotocol.io) server that lets Claude work with your **Outlook mail and
+calendar, OneDrive and SharePoint** through Microsoft Graph. It runs on your own computer and signs in as you,
 so it can only reach what you can already reach.
 
 It's built to fill the gaps in typical Microsoft 365 connectors:
@@ -14,6 +14,8 @@ It's built to fill the gaps in typical Microsoft 365 connectors:
 - **Read, create, upload, download, move, rename and copy** files in OneDrive and SharePoint,
   including large files
 - **Read and edit Excel workbooks** in place, with an automatic backup copy before each change
+- **Add and change calendar events**, including all-day events and free/busy status, on your own
+  calendar without inviting anyone
 
 ## What it won't do
 
@@ -21,6 +23,8 @@ It's built to fill the gaps in typical Microsoft 365 connectors:
   Junk.
 - **Delete files without asking.** `delete_files` sends files (never folders) to the recycle bin, and
   you confirm every deletion. Turn it off with `m365-mcp configure --delete-mode disabled`.
+- **Invite people or delete events.** Calendar tools never add attendees, won't change events that
+  have them, and can't delete events.
 - **Overwrite files silently.** Name clashes get a new name unless you ask to overwrite, and
   OneDrive/SharePoint keep the old version in version history.
 - **Send without asking.** Email is drafted by default. When you ask Claude to send, you're shown
@@ -97,7 +101,7 @@ The same settings can come from environment variables: `M365_MCP_CLIENT_ID`, `M3
 
 **Read-only mode** offers only the tools that search and read: nothing can be moved, written,
 drafted or sent. **Tool groups** are `mail`, `drafts` (drafting and sending), `files` (OneDrive and
-SharePoint) and `excel`; the default is all of them. Tools that are switched off aren't shown to
+SharePoint), `excel` and `calendar`; the default is all of them. Tools that are switched off aren't shown to
 Claude at all. Restart Claude after changing either setting.
 
 Logs never contain sign-in tokens or email addresses; they're replaced with `[redacted]` and
@@ -113,6 +117,7 @@ local access for OneDrive or SharePoint work.
 - "Draft a reply to Sam's last email saying Thursday works, and attach the agenda from my OneDrive."
 - "Add a row to the Team Register spreadsheet for our new starter."
 - "Send the three drafts we just wrote."
+- "Put Sam's leave from 9 to 26 November in my calendar as an all-day event, shown as free."
 
 ## Tools
 
@@ -121,6 +126,7 @@ local access for OneDrive or SharePoint work.
 | Mail | `search_mail`, `read_email`, `list_mail_folders`, `create_mail_folder`, `save_email_attachments`, `save_email`, `move_emails`, `mark_emails`, `create_draft`, `send_drafts` |
 | Files | `find_sharepoint_sites`, `list_libraries`, `list_folder`, `search_files`, `read_file`, `download_file`, `upload_file`, `write_text_file`, `create_folder`, `move_or_rename`, `copy_file`, `delete_files` |
 | Excel | `excel_list_sheets`, `excel_read`, `excel_write`, `excel_append_rows` |
+| Calendar | `list_events`, `create_event`, `update_event` |
 
 A note on safety: emails are written by other people, and a message could contain text that tries to
 instruct an AI. The server labels email content as untrusted, and sending always needs your
