@@ -21,7 +21,7 @@ It's built to fill the gaps in typical Microsoft 365 connectors:
 
 - **Delete mail.** There are no tools that delete email, and it won't move mail to Deleted Items or
   Junk.
-- **Delete files without asking.** `delete_files` sends files (never folders) to the recycle bin, and
+- **Delete files without asking.** `delete_files` sends files and empty folders (never folders with anything in them) to the recycle bin, and
   you confirm every deletion. Turn it off with `m365-mcp configure --delete-mode disabled`.
 - **Invite people or delete events.** Calendar tools never add attendees, won't change events that
   have them, and can't delete events.
