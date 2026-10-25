@@ -44,10 +44,23 @@ async def test_accepted_prompt_deletes(mock):
     assert ctx.asked.startswith("Delete 1 file?")
 
 
-async def test_folders_are_refused(mock):
-    mock.get("/me/drive/root:/Docs:").respond(json=item("Docs", folder=True))
-    with pytest.raises(Exception, match="is a folder"):
+async def test_folders_with_contents_are_refused(mock):
+    full = item("Docs", folder=True)
+    full["folder"]["childCount"] = 3
+    mock.get("/me/drive/root:/Docs:").respond(json=full)
+    delete = mock.delete("/drives/DRIVE/items/ITEM").respond(204)
+    with pytest.raises(Exception, match="is a folder with 3 item"):
         await server.delete_files(["Docs"], FakeCtx(), user_confirmed=True)
+    assert not delete.called
+
+
+async def test_empty_folders_need_confirmation_then_delete(mock):
+    mock.get("/me/drive/root:/Docs/Old:").respond(json=item("Old", folder=True))
+    delete = mock.delete("/drives/DRIVE/items/ITEM").respond(204)
+    out = await server.delete_files(["Docs/Old"], FakeCtx())
+    assert out["needs_confirmation"] and "1 empty folder" in out["summary"] and not delete.called
+    out = await server.delete_files(["Docs/Old"], FakeCtx(), user_confirmed=True)
+    assert out["results"] == [{"name": "Old", "deleted": True}] and delete.called
 
 
 async def test_deleting_can_be_disabled(monkeypatch):

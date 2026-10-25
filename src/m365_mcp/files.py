@@ -199,25 +199,37 @@ MAX_DELETE = 25
 
 
 async def items_for_deletion(graph: Graph, drive: str | None, paths: list[str]) -> list[tuple[str, dict]]:
-    """Look up the files to delete. Folders are refused so one call can't remove a whole tree."""
+    """Look up the files to delete. Empty folders are allowed; folders with anything in them are refused
+    so one call can't remove a whole tree."""
     if not paths:
-        raise ValueError("Give at least one file path.")
+        raise ValueError("Give at least one file or empty folder path.")
     if len(paths) > MAX_DELETE:
-        raise ValueError(f"Delete at most {MAX_DELETE} files at a time.")
+        raise ValueError(f"Delete at most {MAX_DELETE} items at a time.")
     found = []
     for path in paths:
         ref, item = await drives.get_item(graph, drive, path)
-        if "folder" in item:
-            raise ValueError(f"'{path}' is a folder. Only files can be deleted here; delete folders in OneDrive or SharePoint.")
+        if "folder" in item and (item["folder"].get("childCount") or 0) != 0:
+            raise ValueError(
+                f"'{path}' is a folder with {item['folder'].get('childCount')} item(s) in it. Only files and empty "
+                "folders can be deleted here; empty it first or delete it in OneDrive or SharePoint."
+            )
         found.append((ref, item))
     return found
 
 
 def describe_for_deletion(items: list[tuple[str, dict]]) -> str:
-    lines = [f"Delete {len(items)} file{'s' if len(items) != 1 else ''}? They go to the recycle bin and can be restored."]
+    n_folders = sum(1 for _, item in items if "folder" in item)
+    n_files = len(items) - n_folders
+    parts = []
+    if n_files:
+        parts.append(f"{n_files} file{'s' if n_files != 1 else ''}")
+    if n_folders:
+        parts.append(f"{n_folders} empty folder{'s' if n_folders != 1 else ''}")
+    lines = [f"Delete {' and '.join(parts)}? They go to the recycle bin and can be restored."]
     for _, item in items:
         folder = (item.get("parentReference") or {}).get("path", "").split("root:", 1)[-1] or "/"
-        lines.append(f"• {item.get('name')}  (in {folder}, {item.get('size', 0):,} bytes)")
+        detail = "empty folder" if "folder" in item else f"{item.get('size', 0):,} bytes"
+        lines.append(f"• {item.get('name')}  (in {folder}, {detail})")
     return "\n".join(lines)
 
 

@@ -220,13 +220,14 @@ async def send_drafts(draft_ids: list[str], ctx: Context, user_confirmed: bool =
 
 
 class DeleteConfirmation(BaseModel):
-    delete: bool = Field(description="Tick to move these files to the recycle bin now.")
+    delete: bool = Field(description="Tick to move these items to the recycle bin now.")
 
 
 @server.tool(annotations=SEND)
 async def delete_files(paths: list[str], ctx: Context, drive: str | None = None, user_confirmed: bool = False) -> dict:
-    """Delete one or more files (not folders) from OneDrive or SharePoint. They go to the recycle bin and
-    can be restored from there. Only use this when the user has asked for the files to be deleted. The
+    """Delete one or more files or EMPTY folders from OneDrive or SharePoint. Folders that still contain
+    anything are refused. Everything goes to the recycle bin and can be restored from there. Only use this
+    when the user has asked for these items to be deleted. The
     user always confirms first: either the app shows them a confirmation prompt, or this tool returns a
     summary that you must show the user, and you may only call again with user_confirmed=true after they
     explicitly say yes."""
