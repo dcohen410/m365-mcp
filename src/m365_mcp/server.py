@@ -163,7 +163,7 @@ async def create_draft(
     """Create an email draft in Outlook. Nothing is sent. Can be a new email, a reply
     (reply_to_message_id, optionally reply_all) or a forward (forward_message_id); replies and forwards
     keep the original thread below your text. Attach files from this computer or OneDrive/SharePoint.
-    The user's signature is added if one is configured."""
+    The user's signature (HTML and/or image) is added after the body if one is configured."""
     specs = [a.model_dump() for a in attachments or []]
     return await guard(mail.create_draft(
         graph(), cfg, to=to, subject=subject, body=body, body_is_html=body_is_html, cc=cc, bcc=bcc,

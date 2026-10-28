@@ -1,11 +1,11 @@
-"""Read-only mode, tool groups and log redaction."""
+"""Read-only mode, tool groups, the signature image setting and log redaction."""
 
 import logging
 
 import pytest
 
+from m365_mcp import cli, logs, server
 from m365_mcp import config as config_mod
-from m365_mcp import logs, server
 from m365_mcp.config import Config
 
 
@@ -73,3 +73,30 @@ def test_settings_saved_before_calendar_still_mean_everything(monkeypatch):
         assert config_mod.load().tool_groups == ["mail", "files"]
     finally:
         path.unlink()
+
+
+def test_signature_image_is_copied_into_settings_and_removable(monkeypatch, tmp_path):
+    settings = tmp_path / "settings"
+    monkeypatch.setenv("M365_MCP_CONFIG_DIR", str(settings))
+    original = tmp_path / "My Signature.PNG"
+    original.write_bytes(b"\x89PNG\r\n\x1a\n")
+    cli.main(["configure", "--signature-image", str(original)])
+    stored = settings / "signature-image.png"
+    assert config_mod.load().signature_image == str(stored)
+    original.unlink()  # the copy keeps working
+    assert config_mod.load().signature_image_file() == stored
+
+    cli.main(["configure", "--signature-image", ""])
+    assert config_mod.load().signature_image == "" and not stored.exists()
+
+
+def test_signature_image_rejects_other_files_and_keeps_the_old_one(monkeypatch, tmp_path, capsys):
+    monkeypatch.setenv("M365_MCP_CONFIG_DIR", str(tmp_path / "settings"))
+    good = tmp_path / "sig.jpg"
+    good.write_bytes(b"\xff\xd8")
+    cli.main(["configure", "--signature-image", str(good)])
+    bad = tmp_path / "sig.pdf"
+    bad.write_bytes(b"%PDF")
+    assert cli.main(["configure", "--signature-image", str(bad)]) == 1
+    assert "PNG, JPEG or GIF" in capsys.readouterr().err
+    assert config_mod.load().signature_image_file() is not None

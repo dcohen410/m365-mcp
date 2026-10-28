@@ -5,9 +5,13 @@ from __future__ import annotations
 import argparse
 import os
 import sys
+from pathlib import Path
 
-from . import __version__, auth
+from . import __version__, auth, mail
 from . import config as config_mod
+
+SIGNATURE_IMAGE_NAME = "signature-image"
+SIGNATURE_IMAGE_LIMIT = 1024 * 1024
 
 
 def _configure(args: argparse.Namespace) -> int:
@@ -20,6 +24,12 @@ def _configure(args: argparse.Namespace) -> int:
         cfg.local_dirs = [os.path.expanduser(p) for p in args.local_dir]
     if args.signature is not None:
         cfg.signature_html = os.path.expanduser(args.signature)
+    if args.signature_image is not None:
+        try:
+            cfg.signature_image = _store_signature_image(args.signature_image)
+        except ValueError as exc:
+            print(exc, file=sys.stderr)
+            return 1
     if args.send_mode:
         cfg.send_mode = args.send_mode
     if args.read_only is not None:
@@ -39,6 +49,28 @@ def _configure(args: argparse.Namespace) -> int:
         return 1
     print("Next: run `m365-mcp login`.")
     return 0
+
+
+def _store_signature_image(source: str) -> str:
+    """Copy the image into the settings folder, so moving or deleting the original
+    doesn't lose it. Returns the stored path, or "" to remove the image."""
+    path = Path(source).expanduser() if source else None
+    if path:
+        if not path.is_file():
+            raise ValueError(f"Can't find the signature image {path}.")
+        if path.suffix.lower() not in mail.SIGNATURE_IMAGE_TYPES:
+            raise ValueError("The signature image must be a PNG, JPEG or GIF.")
+        if path.stat().st_size > SIGNATURE_IMAGE_LIMIT:
+            raise ValueError("The signature image is over 1 MB. Please use a smaller one.")
+        data = path.read_bytes()
+    for old in config_mod.config_dir().glob(SIGNATURE_IMAGE_NAME + ".*"):
+        old.unlink()
+    if not path:
+        return ""
+    stored = config_mod.config_dir() / (SIGNATURE_IMAGE_NAME + path.suffix.lower())
+    stored.parent.mkdir(parents=True, exist_ok=True)
+    stored.write_bytes(data)
+    return str(stored)
 
 
 def _login(args: argparse.Namespace) -> int:
@@ -61,6 +93,7 @@ def _status(_: argparse.Namespace) -> int:
     print(f"Tenant ID:      {cfg.tenant_id or '(not set)'}")
     print(f"Local folders:  {', '.join(cfg.local_dirs) or '(none)'}")
     print(f"Signature:      {cfg.signature_html or '(none)'}")
+    print(f"Signature image: {cfg.signature_image or '(none)'}")
     print(f"Sending:        {cfg.send_mode}")
     print(f"Read-only:      {'yes' if cfg.read_only else 'no'}")
     print(f"Tool groups:    {', '.join(cfg.tool_groups)}")
@@ -88,6 +121,9 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--local-dir", action="append",
                    help="a folder on this computer the server may read and write (repeatable; default ~/Downloads)")
     p.add_argument("--signature", help="path to an HTML email signature to add to new drafts ('' to remove)")
+    p.add_argument("--signature-image",
+                   help="a PNG, JPEG or GIF signature to embed at the end of new drafts; it's copied into the "
+                        "settings folder ('' to remove)")
     p.add_argument("--send-mode", choices=config_mod.SEND_MODES,
                    help="'confirm' (default): sending allowed with confirmation; 'disabled': drafts only")
     p.add_argument("--read-only", action=argparse.BooleanOptionalAction, default=None,

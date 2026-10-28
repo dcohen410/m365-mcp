@@ -78,6 +78,9 @@ class Config:
     local_dirs: list[str] = field(default_factory=lambda: [str(Path.home() / "Downloads")])
     # Optional HTML file appended to the body of new drafts.
     signature_html: str = ""
+    # Optional image (PNG, JPEG or GIF) embedded at the end of new drafts,
+    # after signature_html. `configure` copies it into the settings folder.
+    signature_image: str = ""
     # "confirm": sending is allowed but every send is confirmed by the user.
     # "disabled": the server can only create drafts.
     send_mode: str = "confirm"
@@ -105,6 +108,12 @@ class Config:
         path = Path(self.signature_html).expanduser()
         return path.read_text(encoding="utf-8") if path.is_file() else ""
 
+    def signature_image_file(self) -> Path | None:
+        if not self.signature_image:
+            return None
+        path = Path(self.signature_image).expanduser()
+        return path if path.is_file() else None
+
 
 def load() -> Config:
     data: dict = {}
@@ -117,6 +126,7 @@ def load() -> Config:
         tenant_id=data.get("tenant_id", ""),
         local_dirs=data.get("local_dirs") or Config().local_dirs,
         signature_html=data.get("signature_html", ""),
+        signature_image=data.get("signature_image", ""),
         send_mode=data.get("send_mode", "confirm"),
         read_only=bool(data.get("read_only", False)),
         tool_groups=_saved_groups(data.get("tool_groups")),
@@ -129,6 +139,7 @@ def load() -> Config:
     if env.get(ENV_PREFIX + "LOCAL_DIRS"):
         cfg.local_dirs = [p for p in env[ENV_PREFIX + "LOCAL_DIRS"].split(os.pathsep) if p]
     cfg.signature_html = env.get(ENV_PREFIX + "SIGNATURE_HTML", cfg.signature_html)
+    cfg.signature_image = env.get(ENV_PREFIX + "SIGNATURE_IMAGE", cfg.signature_image)
     cfg.send_mode = env.get(ENV_PREFIX + "SEND_MODE", cfg.send_mode)
     if cfg.send_mode not in SEND_MODES:
         cfg.send_mode = "confirm"
@@ -168,6 +179,7 @@ def save(cfg: Config) -> Path:
                 "tenant_id": cfg.tenant_id,
                 "local_dirs": cfg.local_dirs,
                 "signature_html": cfg.signature_html,
+                "signature_image": cfg.signature_image,
                 "send_mode": cfg.send_mode,
                 "read_only": cfg.read_only,
                 "tool_groups": cfg.tool_groups,

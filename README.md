@@ -88,6 +88,7 @@ read-only ones, but leave `send_drafts` and `delete_files` on "Ask every time".
 ```bash
 m365-mcp configure --local-dir ~/Downloads --local-dir ~/Documents/Invoices   # folders it may use on this computer
 m365-mcp configure --signature ~/signature.html                               # added to new drafts
+m365-mcp configure --signature-image ~/signature.png                          # embedded at the end of new drafts
 m365-mcp configure --send-mode disabled                                        # drafts only, never send
 m365-mcp configure --read-only                                                 # look but don't touch (--no-read-only to undo)
 m365-mcp configure --tools mail,drafts                                         # only offer some groups of tools
@@ -97,7 +98,12 @@ m365-mcp logout                                                                #
 
 The same settings can come from environment variables: `M365_MCP_CLIENT_ID`, `M365_MCP_TENANT_ID`,
 `M365_MCP_LOCAL_DIRS` (separated by `:` on macOS/Linux, `;` on Windows), `M365_MCP_SIGNATURE_HTML`,
-`M365_MCP_SEND_MODE`, `M365_MCP_READ_ONLY` (`true`/`false`) and `M365_MCP_TOOLS` (e.g. `mail,files`).
+`M365_MCP_SIGNATURE_IMAGE`, `M365_MCP_SEND_MODE`, `M365_MCP_READ_ONLY` (`true`/`false`) and
+`M365_MCP_TOOLS` (e.g. `mail,files`).
+
+**Signature image**: a PNG, JPEG or GIF (up to 1 MB) embedded in the email itself, not linked, so it
+shows without the recipient having to download pictures. Images wider than 700 pixels are shown at
+700. `configure` keeps its own copy in the settings folder.
 
 **Read-only mode** offers only the tools that search and read: nothing can be moved, written,
 drafted or sent. **Tool groups** are `mail`, `drafts` (drafting and sending), `files` (OneDrive and

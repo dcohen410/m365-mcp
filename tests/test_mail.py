@@ -110,6 +110,59 @@ async def test_new_draft_adds_signature_and_escapes_text(mock, graph, cfg, tmp_p
     assert "Nothing has been sent" in out["status"]
 
 
+PNG_800x267 = b"\x89PNG\r\n\x1a\n" + b"\x00\x00\x00\rIHDR" + (800).to_bytes(4, "big") + (267).to_bytes(4, "big")
+
+
+async def test_new_draft_embeds_signature_image_inline(mock, graph, cfg, tmp_path):
+    image = tmp_path / "sig.png"
+    image.write_bytes(PNG_800x267)
+    cfg.signature_image = str(image)
+    route = mock.post("/me/messages").respond(json={"id": "d1", "toRecipients": []})
+    attach = mock.post("/me/messages/d1/attachments").respond(json={})
+    out = await mail.create_draft(graph, cfg, to=["x@y.com"], body="Hi")
+    body = json.loads(route.calls[0].request.content)["body"]["content"]
+    assert body.startswith("<p>Hi</p><br><p")
+    assert f'src="cid:{mail.SIGNATURE_CID}"' in body
+    assert 'width="700" height="234"' in body
+    sent = json.loads(attach.calls[0].request.content)
+    assert sent["isInline"] is True and sent["contentId"] == mail.SIGNATURE_CID
+    assert sent["contentType"] == "image/png" and sent["name"] == "sig.png"
+    assert out["attachments"] == []
+
+
+async def test_reply_puts_signature_image_above_thread(mock, graph, cfg, tmp_path):
+    image = tmp_path / "sig.png"
+    image.write_bytes(PNG_800x267)
+    cfg.signature_image = str(image)
+    mock.post("/me/messages/m1/createReply").respond(json={"id": "d2", "body": {"content": "<div>quoted</div>"}})
+    patch = mock.patch("/me/messages/d2").respond(json={"id": "d2"})
+    attach = mock.post("/me/messages/d2/attachments").respond(json={})
+    await mail.create_draft(graph, cfg, body="Thanks", reply_to_message_id="m1")
+    content = json.loads(patch.calls[0].request.content)["body"]["content"]
+    assert content.index("cid:") < content.index("quoted")
+    assert attach.called
+
+
+async def test_no_signature_image_when_add_signature_is_off(mock, graph, cfg, tmp_path):
+    image = tmp_path / "sig.png"
+    image.write_bytes(PNG_800x267)
+    cfg.signature_image = str(image)
+    route = mock.post("/me/messages").respond(json={"id": "d1"})
+    attach = mock.post("/me/messages/d1/attachments").respond(json={})
+    await mail.create_draft(graph, cfg, to=["x@y.com"], body="Hi", add_signature=False)
+    assert "cid:" not in json.loads(route.calls[0].request.content)["body"]["content"]
+    assert not attach.called
+
+
+def test_image_size_reads_png_gif_and_jpeg():
+    assert mail.image_size(PNG_800x267) == (800, 267)
+    assert mail.image_size(b"GIF89a" + (120).to_bytes(2, "little") + (40).to_bytes(2, "little")) == (120, 40)
+    jpeg = (b"\xff\xd8" + b"\xff\xe0" + (16).to_bytes(2, "big") + b"JFIF\x00" + b"\x00" * 9
+            + b"\xff\xc0" + (17).to_bytes(2, "big") + b"\x08" + (300).to_bytes(2, "big") + (640).to_bytes(2, "big"))
+    assert mail.image_size(jpeg) == (640, 300)
+    assert mail.image_size(b"not an image") is None
+
+
 async def test_reply_draft_keeps_quoted_thread(mock, graph, cfg):
     mock.post("/me/messages/m1/createReplyAll").respond(json={"id": "d2", "body": {"content": "<div>quoted</div>"}})
     patch = mock.patch("/me/messages/d2").respond(json={"id": "d2", "subject": "RE: x"})
