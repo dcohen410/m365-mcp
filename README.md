@@ -28,7 +28,9 @@ It's built to fill the gaps in typical Microsoft 365 connectors:
 - **Overwrite files silently.** Name clashes get a new name unless you ask to overwrite, and
   OneDrive/SharePoint keep the old version in version history.
 - **Send without asking.** Email is drafted by default. When you ask Claude to send, you're shown
-  who it's going to and asked to confirm. Administrators can turn sending off entirely.
+  who it's going to and asked to confirm. If your app can't show a confirmation prompt, Claude gets a
+  one-time code with the summary, and nothing is sent until it comes back with that code for exactly
+  those emails, unchanged. Deleting files works the same way. Administrators can turn sending off entirely.
 - **Phone home.** There's no server, telemetry or third party. Your mail and files go between
   Microsoft and your computer, and to the AI app you're using when it reads them.
 
