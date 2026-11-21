@@ -10,7 +10,7 @@ from mcp_types import ToolAnnotations
 from pydantic import BaseModel, Field
 
 from . import config as config_mod
-from . import events, excel, files, localfs, logs, mail
+from . import confirm, events, excel, files, localfs, logs, mail
 from .auth import NotSignedIn, TokenProvider
 from .graph import Graph, GraphError
 
@@ -183,16 +183,24 @@ def _client_can_confirm(ctx: Context) -> bool:
     )
 
 
+confirmations = confirm.Confirmations()
+
+
+async def _redeem(action: str, code: str, fp: str) -> None:
+    confirmations.redeem(action, code, fp)
+
+
 class SendConfirmation(BaseModel):
     send: bool = Field(description="Tick to send these emails now.")
 
 
 @server.tool(annotations=SEND)
-async def send_drafts(draft_ids: list[str], ctx: Context, user_confirmed: bool = False) -> dict:
+async def send_drafts(draft_ids: list[str], ctx: Context, confirmation_code: str | None = None) -> dict:
     """Send one or more drafts. Only use this when the user has asked for the email(s) to be sent.
     The user is always asked to confirm the recipients first: either the app shows them a
-    confirmation prompt, or this tool returns a summary that you must show the user, and you may only
-    call again with user_confirmed=true after they explicitly say yes."""
+    confirmation prompt, or this tool returns a summary and a confirmation_code. Show the user the
+    summary; only if they explicitly say yes, call again with the same draft_ids and that
+    confirmation_code. A code works once, for those drafts exactly as summarised, for 15 minutes."""
     if cfg.send_mode == "disabled":
         raise ToolError("Sending is turned off in this server's settings. The drafts are in Outlook to send by hand.")
     summaries = [await guard(mail.draft_summary(graph(), d)) for d in draft_ids]
@@ -208,14 +216,18 @@ async def send_drafts(draft_ids: list[str], ctx: Context, user_confirmed: bool =
     if answer is not None:
         if answer.action != "accept" or not answer.data.send:
             return {"sent": False, "reason": "The user did not confirm. The drafts are still in Outlook."}
-    elif not user_confirmed:
-        return {
-            "sent": False,
-            "needs_confirmation": True,
-            "summary": question,
-            "next_step": "Show this summary to the user and ask whether to send. Only if they clearly say yes, "
-                         "call send_drafts again with the same draft_ids and user_confirmed=true.",
-        }
+    else:
+        fp = confirm.fingerprint("send", summaries)
+        if not confirmation_code:
+            return {
+                "sent": False,
+                "needs_confirmation": True,
+                "summary": question,
+                "confirmation_code": confirmations.issue("send", fp),
+                "next_step": "Show this summary to the user and ask whether to send. Only if they clearly say yes, "
+                             "call send_drafts again with the same draft_ids and this confirmation_code.",
+            }
+        await guard(_redeem("send", confirmation_code, fp))
     return {"results": await guard(mail.send_drafts(graph(), draft_ids))}
 
 
@@ -224,13 +236,16 @@ class DeleteConfirmation(BaseModel):
 
 
 @server.tool(annotations=SEND)
-async def delete_files(paths: list[str], ctx: Context, drive: str | None = None, user_confirmed: bool = False) -> dict:
+async def delete_files(
+    paths: list[str], ctx: Context, drive: str | None = None, confirmation_code: str | None = None,
+) -> dict:
     """Delete one or more files or EMPTY folders from OneDrive or SharePoint. Folders that still contain
     anything are refused. Everything goes to the recycle bin and can be restored from there. Only use this
     when the user has asked for these items to be deleted. The
     user always confirms first: either the app shows them a confirmation prompt, or this tool returns a
-    summary that you must show the user, and you may only call again with user_confirmed=true after they
-    explicitly say yes."""
+    summary and a confirmation_code. Show the user the summary; only if they explicitly say yes, call
+    again with the same paths and drive and that confirmation_code. A code works once, for those items
+    exactly as summarised, for 15 minutes."""
     if cfg.delete_mode == "disabled":
         raise ToolError("Deleting files is turned off in this server's settings. Delete them in OneDrive or SharePoint.")
     items = await guard(files.items_for_deletion(graph(), drive, paths))
@@ -246,14 +261,21 @@ async def delete_files(paths: list[str], ctx: Context, drive: str | None = None,
     if answer is not None:
         if answer.action != "accept" or not answer.data.delete:
             return {"deleted": False, "reason": "The user did not confirm. Nothing was deleted."}
-    elif not user_confirmed:
-        return {
-            "deleted": False,
-            "needs_confirmation": True,
-            "summary": question,
-            "next_step": "Show this summary to the user and ask whether to delete. Only if they clearly say yes, "
-                         "call delete_files again with the same paths and user_confirmed=true.",
-        }
+    else:
+        # Only stable fields: a drive item also carries a download link that changes on every request.
+        fp = confirm.fingerprint("delete", [
+            (ref, i.get("id"), i.get("name"), i.get("eTag") or i.get("lastModifiedDateTime"), i.get("size"))
+            for ref, i in items])
+        if not confirmation_code:
+            return {
+                "deleted": False,
+                "needs_confirmation": True,
+                "summary": question,
+                "confirmation_code": confirmations.issue("delete", fp),
+                "next_step": "Show this summary to the user and ask whether to delete. Only if they clearly say yes, "
+                             "call delete_files again with the same paths and this confirmation_code.",
+            }
+        await guard(_redeem("delete", confirmation_code, fp))
     return {"results": await guard(files.delete_items(graph(), items))}
 
 
