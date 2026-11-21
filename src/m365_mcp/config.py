@@ -9,6 +9,7 @@ tenant IDs.
 from __future__ import annotations
 
 import json
+import logging
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -28,6 +29,8 @@ SCOPES = [
     "Calendars.ReadWrite",
     "MailboxSettings.Read",
 ]
+
+log = logging.getLogger("m365_mcp")
 
 SEND_MODES = ("confirm", "disabled")
 DELETE_MODES = ("confirm", "disabled")
@@ -142,24 +145,31 @@ def load() -> Config:
     cfg.signature_image = env.get(ENV_PREFIX + "SIGNATURE_IMAGE", cfg.signature_image)
     cfg.send_mode = env.get(ENV_PREFIX + "SEND_MODE", cfg.send_mode)
     if cfg.send_mode not in SEND_MODES:
-        cfg.send_mode = "confirm"
+        # A typo shouldn't leave sending switched on.
+        log.warning("Unknown send_mode %r; sending is turned off until it's fixed.", cfg.send_mode)
+        cfg.send_mode = "disabled"
     if env.get(ENV_PREFIX + "READ_ONLY"):
         cfg.read_only = _truthy(env[ENV_PREFIX + "READ_ONLY"])
     if env.get(ENV_PREFIX + "TOOLS"):
         cfg.tool_groups = _groups_or_default(env[ENV_PREFIX + "TOOLS"])
     cfg.delete_mode = env.get(ENV_PREFIX + "DELETE_MODE", cfg.delete_mode)
     if cfg.delete_mode not in DELETE_MODES:
+        log.warning("Unknown delete_mode %r; deleting is turned off until it's fixed.", cfg.delete_mode)
         cfg.delete_mode = "disabled"
     return cfg
 
 
 def _groups_or_default(value) -> list[str]:
-    # A bad value in the settings should not stop the server starting, so fall
-    # back to every group; `configure` rejects bad values before saving them.
+    # A bad value in the settings should not stop the server starting, but it mustn't
+    # switch on more than was asked for either: keep only the group names that are
+    # recognised. `configure` rejects bad values before saving them.
     try:
         return parse_tool_groups(value or "all")
     except ValueError:
-        return list(TOOL_GROUPS)
+        items = value.split(",") if isinstance(value, str) else (value or [])
+        known = [g for g in TOOL_GROUPS if g in {str(i).strip().lower() for i in items}]
+        log.warning("Unknown tool group in %r; using only %s.", value, ", ".join(known) or "no groups")
+        return known
 
 
 def _saved_groups(value) -> list[str]:

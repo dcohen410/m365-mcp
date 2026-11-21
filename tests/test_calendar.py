@@ -58,11 +58,13 @@ async def test_list_uses_mailbox_time_zone_and_filters(mock, graph, tz):
     out = await events.list_events(graph, "2026-11-01", "2026-11-30", query="dentist")
     req = route.calls[0].request
     assert req.headers["Prefer"] == f'outlook.timezone="{TZ}"'
-    assert req.url.params["endDateTime"] == "2026-12-01T00:00:00"
+    # Graph reads the window as UTC, so a day more is asked for each side and filtered locally.
+    assert req.url.params["startDateTime"] == "2026-10-31T00:00:00"
+    assert req.url.params["endDateTime"] == "2026-12-02T00:00:00"
     assert [e["id"] for e in out] == ["e2"]
 
 
-async def test_update_refuses_events_with_attendees(mock, graph):
+async def test_update_refuses_events_with_attendees(mock, graph, tz):
     mock.get("/me/events/e1").respond(json=event(attendees=[{"emailAddress": {"address": "a@b.com"}}]))
     with pytest.raises(ValueError, match="attendees"):
         await events.update_event(graph, "e1", show_as="busy")
@@ -78,8 +80,50 @@ async def test_update_turns_timed_event_into_all_day(mock, graph, tz):
     assert sent["end"]["dateTime"] == "2026-10-17T00:00:00"
 
 
-async def test_update_show_as_only_leaves_times_alone(mock, graph):
+async def test_update_show_as_only_leaves_times_alone(mock, graph, tz):
     mock.get("/me/events/e1").respond(json=event())
     route = mock.patch("/me/events/e1").respond(json=event(showAs="oof"))
     await events.update_event(graph, "e1", show_as="oof")
     assert json.loads(route.calls[0].request.content) == {"showAs": "oof"}
+
+
+def timed(id_, start, end):
+    return event(id=id_, isAllDay=False, start={"dateTime": f"{start}.0000000", "timeZone": TZ},
+                 end={"dateTime": f"{end}.0000000", "timeZone": TZ})
+
+
+async def test_list_keeps_only_events_in_the_local_days(mock, graph, tz):
+    mock.get("/me/calendarView").respond(json={"value": [
+        timed("night-before", "2026-11-19T20:00:00", "2026-11-19T21:00:00"),
+        timed("early", "2026-11-20T08:00:00", "2026-11-20T08:50:00"),
+        timed("late", "2026-11-20T23:30:00", "2026-11-21T00:30:00"),
+        timed("next-morning", "2026-11-21T08:00:00", "2026-11-21T09:00:00"),
+        event(id="leave", start={"dateTime": "2026-11-18T00:00:00", "timeZone": TZ},
+              end={"dateTime": "2026-11-23T00:00:00", "timeZone": TZ}),
+    ]})
+    out = await events.list_events(graph, "2026-11-20", "2026-11-20")
+    assert [e["id"] for e in out] == ["early", "late", "leave"]
+
+
+async def test_update_reads_event_in_mailbox_time_and_keeps_start(mock, graph, tz):
+    get = mock.get("/me/events/e1").respond(json=timed("e1", "2026-11-20T09:00:00", "2026-11-20T09:30:00"))
+    route = mock.patch("/me/events/e1").respond(json=timed("e1", "2026-11-20T09:00:00", "2026-11-20T10:00:00"))
+    await events.update_event(graph, "e1", end="2026-11-20T10:00")
+    assert get.calls[0].request.headers["Prefer"] == f'outlook.timezone="{TZ}"'
+    sent = json.loads(route.calls[0].request.content)
+    assert sent["start"] == {"dateTime": "2026-11-20T09:00:00", "timeZone": TZ}
+    assert sent["end"] == {"dateTime": "2026-11-20T10:00:00", "timeZone": TZ}
+
+
+async def test_times_with_an_offset_are_sent_as_utc(graph):
+    out = events._times("2026-10-16T09:30+11:00", "2026-10-16T10:00+11:00", False, TZ)
+    assert out["start"] == {"dateTime": "2026-10-15T22:30:00", "timeZone": "UTC"}
+    out = events._times("2026-10-16T09:30Z", "2026-10-16T10:00Z", False, TZ)
+    assert out["end"] == {"dateTime": "2026-10-16T10:00:00", "timeZone": "UTC"}
+    with pytest.raises(ValueError, match="same way"):
+        events._times("2026-10-16T09:30", "2026-10-16T10:00Z", False, TZ)
+
+
+async def test_bad_event_id_is_refused(graph):
+    with pytest.raises(ValueError, match="isn't a valid"):
+        await events.update_event(graph, "e1/../e2", show_as="busy")

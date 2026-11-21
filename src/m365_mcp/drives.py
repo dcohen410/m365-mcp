@@ -40,7 +40,11 @@ async def drive_base(graph: Graph, drive: str | None) -> str:
 
 
 def clean_path(path: str | None) -> str:
-    return "/".join(p for p in (path or "").replace("\\", "/").split("/") if p)
+    parts = [p for p in (path or "").replace("\\", "/").split("/") if p and p.strip() != "."]
+    if any(p.strip() == ".." for p in parts):
+        # The URL library collapses "..", which would point the request somewhere else entirely.
+        raise ValueError(f"Paths can't contain '..': '{path}'. Give the full path from the top of the drive.")
+    return "/".join(parts)
 
 
 def item_ref(base: str, path: str | None) -> str:

@@ -85,8 +85,18 @@ async def test_move_refuses_deleted_items(graph):
         await mail.move_messages(graph, ["m1"], "Deleted Items")
 
 
+def protected_folders(mock):
+    mock.get("/me/mailFolders/deleteditems").respond(json={"id": "DEL"})
+    mock.get("/me/mailFolders/junkemail").respond(json={"id": "JUNK"})
+    mock.get("/me/mailFolders/recoverableitemsdeletions").respond(
+        status_code=404, json={"error": {"code": "ErrorItemNotFound", "message": "x"}})
+    mock.get("/me/mailFolders/msgfolderroot").respond(json={"id": "ROOT"})
+
+
 async def test_move_to_archive(mock, graph):
+    protected_folders(mock)
     mock.get("/me/mailFolders/archive").respond(json={"id": "ARCH"})
+    mock.get("/me/mailFolders/ARCH").respond(json={"id": "ARCH", "parentFolderId": "ROOT"})
     route = mock.post("/me/messages/m1/move").respond(json={"id": "m1-new"})
     out = await mail.move_messages(graph, ["m1"], "archive")
     assert json.loads(route.calls[0].request.content) == {"destinationId": "ARCH"}
@@ -187,3 +197,47 @@ async def test_attachment_outside_allowed_folders_is_refused(mock, graph, cfg):
     mock.post("/me/messages").respond(json={"id": "d1"})
     with pytest.raises(Exception, match="outside the folders"):
         await mail.create_draft(graph, cfg, to=["x@y.com"], attachments=[{"local_path": "/etc/passwd"}])
+
+
+DELETED_ID = "D" * 70  # long enough to be taken as a folder id
+
+
+async def test_move_refuses_deleted_items_given_by_id(mock, graph):
+    protected_folders(mock)
+    mock.get("/me/mailFolders/deleteditems").respond(json={"id": DELETED_ID})
+    move = mock.post("/me/messages/m1/move").respond(json={"id": "x"})
+    with pytest.raises(ValueError, match="doesn't delete mail"):
+        await mail.move_messages(graph, ["m1"], DELETED_ID)
+    assert not move.called
+
+
+async def test_move_refuses_subfolder_of_deleted_items(mock, graph):
+    protected_folders(mock)
+    mock.get("/me/mailFolders").respond(json={"value": [{"id": "DEL", "displayName": "Deleted Items"}]})
+    mock.get("/me/mailFolders/DEL/childFolders").respond(json={"value": [{"id": "OLD", "displayName": "Old"}]})
+    mock.get("/me/mailFolders/OLD").respond(json={"id": "OLD", "parentFolderId": "DEL"})
+    move = mock.post("/me/messages/m1/move").respond(json={"id": "x"})
+    with pytest.raises(ValueError, match="doesn't delete mail"):
+        await mail.move_messages(graph, ["m1"], "Deleted Items/Old")
+    assert not move.called
+
+
+@pytest.mark.parametrize("bad_id", ["d1/send?", "d1/../d2", "d1?x=1", "d1#x", "../send"])
+async def test_ids_that_would_change_the_request_are_refused(mock, graph, cfg, bad_id):
+    send = mock.post(url__regex=r".*/send.*").respond(status_code=202)
+    with pytest.raises(ValueError, match="isn't a valid"):
+        await mail.create_draft(graph, cfg, body="hi", reply_to_message_id=bad_id, add_signature=False)
+    with pytest.raises(ValueError, match="isn't a valid"):
+        await mail.send_drafts(graph, [bad_id])
+    with pytest.raises(ValueError, match="isn't a valid"):
+        await mail.get_message(graph, bad_id)
+    with pytest.raises(ValueError, match="isn't a valid"):
+        await mail.mark_messages(graph, [bad_id], read=True)
+    assert not send.called
+
+
+async def test_real_looking_ids_are_accepted():
+    from m365_mcp.graph import safe_id
+    real = "AAMkAGVmMDEzMTM4LTZmYWUtNDdkNC1hMDZiLTU1OGY5OTZhYmY4OABGAAAAAAAiQ8W967B7TKBjgx9rVEURBwAiIsqMbYjsT5e-T7KzowPTAAAYbvZDAAA="
+    assert safe_id(real) == real
+    assert safe_id("01ABCDEF!123") == "01ABCDEF!123"

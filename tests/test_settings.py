@@ -44,8 +44,18 @@ def test_settings_from_environment(monkeypatch):
     monkeypatch.setenv("M365_MCP_TOOLS", "excel")
     cfg = config_mod.load()
     assert cfg.read_only and cfg.tool_groups == ["excel"]
+    # A typo switches on only the groups that were named correctly, never everything.
     monkeypatch.setenv("M365_MCP_TOOLS", "nonsense")
-    assert config_mod.load().tool_groups == list(config_mod.TOOL_GROUPS)
+    assert config_mod.load().tool_groups == []
+    monkeypatch.setenv("M365_MCP_TOOLS", "mail,fils")
+    assert config_mod.load().tool_groups == ["mail"]
+
+
+def test_bad_send_and_delete_modes_turn_them_off(monkeypatch):
+    monkeypatch.setenv("M365_MCP_SEND_MODE", "disable")
+    monkeypatch.setenv("M365_MCP_DELETE_MODE", "confrim")
+    cfg = config_mod.load()
+    assert cfg.send_mode == "disabled" and cfg.delete_mode == "disabled"
 
 
 def test_redact():
