@@ -3,12 +3,22 @@
 from __future__ import annotations
 
 import asyncio
+import email.utils
+import re
+import time
 from typing import Any, Callable
 
 import httpx
 
 GRAPH = "https://graph.microsoft.com/v1.0"
 RETRY_STATUSES = {429, 502, 503, 504}
+# Only these methods are safe to repeat after a gateway error: the first attempt may already
+# have worked (a POST to /send that times out can still send the email), so other methods
+# are only retried when Graph says it didn't run them (429, or 503 with Retry-After).
+IDEMPOTENT_METHODS = {"GET", "HEAD", "PUT", "DELETE"}
+# Outlook, calendar and drive ids are URL-safe base64-like strings. Checking them stops an id
+# like "<draftId>/send?" from turning one request into a different one.
+_ID_RE = re.compile(r"^[A-Za-z0-9_=+!-]{1,1024}$")
 MAX_ATTEMPTS = 4
 SIMPLE_UPLOAD_LIMIT = 4 * 1024 * 1024
 # Upload-session chunks must be a multiple of 320 KiB.
@@ -20,6 +30,37 @@ class GraphError(Exception):
         super().__init__(f"Microsoft Graph error {status}{f' ({code})' if code else ''}: {message}")
         self.status = status
         self.code = code
+
+
+def safe_id(value: str, what: str = "id") -> str:
+    """`value` if it's a well-formed Graph id, ready to put in a URL; otherwise a clear error."""
+    v = (value or "").strip()
+    if not _ID_RE.match(v):
+        raise ValueError(f"'{value}' isn't a valid {what}. Use the id exactly as a search or list tool returned it.")
+    return v
+
+
+def _retry_delay(resp: httpx.Response, attempt: int) -> float:
+    value = resp.headers.get("Retry-After")
+    if value:
+        try:
+            return float(value)
+        except ValueError:
+            try:
+                return max(0.0, email.utils.parsedate_to_datetime(value).timestamp() - time.time())
+            except (TypeError, ValueError):
+                pass
+    return float(2 ** attempt)
+
+
+def _should_retry(method: str, resp: httpx.Response) -> bool:
+    if resp.status_code == 429:
+        return True
+    if resp.status_code not in RETRY_STATUSES:
+        return False
+    if method.upper() in IDEMPOTENT_METHODS:
+        return True
+    return resp.status_code == 503 and "Retry-After" in resp.headers
 
 
 class Graph:
@@ -51,9 +92,8 @@ class Graph:
             resp = await self._client.request(
                 method, self._url(path), params=params, json=json, content=content, headers=hdrs
             )
-            if resp.status_code in RETRY_STATUSES and attempt < MAX_ATTEMPTS:
-                delay = float(resp.headers.get("Retry-After", 2 ** attempt))
-                await asyncio.sleep(min(delay, 30))
+            if attempt < MAX_ATTEMPTS and _should_retry(method, resp):
+                await asyncio.sleep(min(_retry_delay(resp, attempt), 30))
                 continue
             break
         if resp.status_code >= 400:

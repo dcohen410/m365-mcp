@@ -9,7 +9,7 @@ from urllib.parse import quote
 
 from . import drives, files, localfs
 from .config import Config
-from .graph import Graph, GraphError
+from .graph import Graph, GraphError, safe_id
 
 WELL_KNOWN_FOLDERS = {
     "inbox", "archive", "drafts", "sentitems", "deleteditems", "junkemail", "outbox", "clutter",
@@ -66,7 +66,7 @@ async def resolve_folder(graph: Graph, folder: str) -> str:
         return (await graph.get(f"/me/mailFolders/{key}", params={"$select": "id"}))["id"]
     parts = [p for p in name.split("/") if p]
     if len(parts) == 1 and len(name) > 60 and " " not in name:
-        return name  # looks like an id already
+        return safe_id(name, "mail folder id")  # looks like an id already
     parent = None
     for part in parts:
         url = f"/me/mailFolders/{parent}/childFolders" if parent else "/me/mailFolders"
@@ -137,6 +137,7 @@ async def search(
 
 
 async def list_attachments(graph: Graph, message_id: str) -> list[dict]:
+    message_id = safe_id(message_id, "message id")
     atts = await graph.get_all(
         f"/me/messages/{message_id}/attachments", params={"$select": "id,name,contentType,size,isInline"}
     )
@@ -149,6 +150,7 @@ async def list_attachments(graph: Graph, message_id: str) -> list[dict]:
 
 
 async def get_message(graph: Graph, message_id: str, max_chars: int = 30_000) -> dict:
+    message_id = safe_id(message_id, "message id")
     m = await graph.get(
         f"/me/messages/{message_id}",
         params={"$select": _MESSAGE_FIELDS + ",body,conversationId"},
@@ -181,6 +183,7 @@ async def save_attachments(
     drive: str | None = None, folder: str | None = None, local_folder: str | None = None,
     include_inline: bool = False,
 ) -> list[dict]:
+    message_id = safe_id(message_id, "message id")
     atts = await list_attachments(graph, message_id)
     if attachment_ids:
         wanted = set(attachment_ids)
@@ -191,7 +194,7 @@ async def save_attachments(
         raise ValueError("No matching attachments on that email.")
     results = []
     for a in atts:
-        data = await graph.get_bytes(f"/me/messages/{message_id}/attachments/{a['id']}/$value")
+        data = await graph.get_bytes(f"/me/messages/{message_id}/attachments/{safe_id(a['id'], 'attachment id')}/$value")
         name = a["name"] or "attachment"
         if a["kind"] == "email" and not name.lower().endswith(".eml"):
             name += ".eml"
@@ -201,7 +204,7 @@ async def save_attachments(
 
 
 async def message_mime(graph: Graph, message_id: str) -> bytes:
-    return await graph.get_bytes(f"/me/messages/{message_id}/$value")
+    return await graph.get_bytes(f"/me/messages/{safe_id(message_id, 'message id')}/$value")
 
 
 async def eml_to_pdf(graph: Graph, eml: bytes) -> bytes:
@@ -211,7 +214,7 @@ async def eml_to_pdf(graph: Graph, eml: bytes) -> bytes:
         "PUT", f"/me/drive/special/approot:/{quote(name)}:/content", content=eml,
         headers={"Content-Type": "application/octet-stream"},
     )
-    item_id = resp.json()["id"]
+    item_id = safe_id(resp.json()["id"], "file id")
     try:
         return await graph.get_bytes(f"/me/drive/items/{item_id}/content", params={"format": "pdf"})
     finally:
@@ -225,6 +228,7 @@ async def save_message(
     graph: Graph, cfg: Config, message_id: str, file_format: str = "pdf", filename: str | None = None,
     drive: str | None = None, folder: str | None = None, local_folder: str | None = None,
 ) -> dict:
+    message_id = safe_id(message_id, "message id")
     meta = await graph.get(f"/me/messages/{message_id}", params={"$select": "subject,receivedDateTime"})
     eml = await message_mime(graph, message_id)
     stem = filename or f"{(meta.get('receivedDateTime') or '')[:10]} {meta.get('subject') or 'email'}".strip()
@@ -239,12 +243,42 @@ async def save_message(
 
 # ---------------------------------------------------------------- organising
 
+NO_MOVE_MESSAGE = "This server doesn't delete mail, so it won't move messages to Deleted Items or Junk."
+
+
+async def _is_protected_folder(graph: Graph, folder_id: str) -> bool:
+    """True if `folder_id` is Deleted Items, Junk or Recoverable Items, or a folder inside one.
+
+    Checked by id, so a folder id, a subfolder path or a display name in another language
+    can't get around it."""
+    protected: set[str] = set()
+    for key in NO_MOVE_FOLDERS:
+        try:
+            protected.add((await graph.get(f"/me/mailFolders/{key}", params={"$select": "id"}))["id"])
+        except GraphError:
+            pass  # not every mailbox has every well-known folder
+    root_id = (await graph.get("/me/mailFolders/msgfolderroot", params={"$select": "id"}))["id"]
+    current = folder_id
+    for _ in range(20):  # folders aren't nested this deep in practice
+        if current in protected:
+            return True
+        if not current or current == root_id:
+            return False
+        folder = await graph.get(f"/me/mailFolders/{safe_id(current, 'mail folder id')}",
+                                 params={"$select": "id,parentFolderId"})
+        current = folder.get("parentFolderId")
+    return False
+
+
 async def move_messages(graph: Graph, message_ids: list[str], destination: str) -> list[dict]:
     key = FOLDER_ALIASES.get(destination.strip().lower(), destination.strip().lower())
     if key in NO_MOVE_FOLDERS:
-        raise ValueError("This server doesn't delete mail, so it won't move messages to Deleted Items or Junk.")
+        raise ValueError(NO_MOVE_MESSAGE)
     dest_id = await resolve_folder(graph, destination)
+    if await _is_protected_folder(graph, dest_id):
+        raise ValueError(NO_MOVE_MESSAGE)
     results = []
+    message_ids = [safe_id(m, "message id") for m in message_ids]
     for mid in message_ids:
         try:
             moved = await graph.post(f"/me/messages/{mid}/move", json={"destinationId": dest_id})
@@ -259,6 +293,7 @@ async def mark_messages(
     add_categories: list[str] | None = None,
 ) -> list[dict]:
     results = []
+    message_ids = [safe_id(m, "message id") for m in message_ids]
     for mid in message_ids:
         body: dict = {}
         if read is not None:
@@ -344,6 +379,7 @@ async def _load_attachments(graph: Graph, cfg: Config, specs: list[dict]) -> lis
 
 
 async def _attach(graph: Graph, draft_id: str, loaded: list[tuple[str, bytes]]) -> list[str]:
+    draft_id = safe_id(draft_id, "draft id")
     for name, data in loaded:
         if len(data) < ATTACHMENT_SIMPLE_LIMIT:
             await graph.post(
@@ -374,7 +410,7 @@ async def create_draft(
     new_html = _html_body(body, body_is_html, signature)
 
     if reply_to_message_id or forward_message_id:
-        source = reply_to_message_id or forward_message_id
+        source = safe_id(reply_to_message_id or forward_message_id, "message id")
         action = "createForward" if forward_message_id else ("createReplyAll" if reply_all else "createReply")
         draft = await graph.post(f"/me/messages/{source}/{action}", json={})
         quoted = (draft.get("body") or {}).get("content", "")
@@ -387,7 +423,7 @@ async def create_draft(
             patch["bccRecipients"] = _recipients(bcc)
         if subject:
             patch["subject"] = subject
-        draft = await graph.patch(f"/me/messages/{draft['id']}", json=patch)
+        draft = await graph.patch(f"/me/messages/{safe_id(draft['id'], 'draft id')}", json=patch)
     else:
         if not to:
             raise ValueError("A new email needs at least one 'to' address.")
@@ -405,7 +441,7 @@ async def create_draft(
     if signature_image:
         name, data, content_type = signature_image
         await graph.post(
-            f"/me/messages/{draft['id']}/attachments",
+            f"/me/messages/{safe_id(draft['id'], 'draft id')}/attachments",
             json={"@odata.type": "#microsoft.graph.fileAttachment", "name": name, "contentType": content_type,
                   "contentBytes": base64.b64encode(data).decode(), "contentId": SIGNATURE_CID, "isInline": True},
         )
@@ -421,6 +457,7 @@ async def create_draft(
 
 
 async def draft_summary(graph: Graph, draft_id: str) -> dict:
+    draft_id = safe_id(draft_id, "draft id")
     d = await graph.get(
         f"/me/messages/{draft_id}",
         params={"$select": "id,subject,toRecipients,ccRecipients,bccRecipients,isDraft,hasAttachments,bodyPreview"},
@@ -451,6 +488,7 @@ def describe_for_confirmation(summaries: list[dict]) -> str:
 
 async def send_drafts(graph: Graph, draft_ids: list[str]) -> list[dict]:
     results = []
+    draft_ids = [safe_id(d, "draft id") for d in draft_ids]
     for did in draft_ids:
         try:
             await graph.post(f"/me/messages/{did}/send")

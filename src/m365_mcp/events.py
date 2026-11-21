@@ -10,7 +10,7 @@ from __future__ import annotations
 import datetime as dt
 import html
 
-from .graph import Graph
+from .graph import Graph, safe_id
 
 SHOW_AS = ("free", "tentative", "busy", "oof", "workingElsewhere")
 _EVENT_FIELDS = "id,subject,start,end,isAllDay,showAs,location,bodyPreview,organizer,attendees,isCancelled,webLink"
@@ -74,12 +74,33 @@ def _times(start: str, end: str | None, all_day: bool, tz: str) -> dict:
     if not end:
         raise ValueError("A timed event needs an `end`.")
     s, e = _parse_datetime(start, "start"), _parse_datetime(end, "end")
+    if (s.tzinfo is None) != (e.tzinfo is None):
+        raise ValueError("Give `start` and `end` the same way: both as local times like 2026-10-16T09:30, "
+                         "or both with a UTC offset like 2026-10-16T09:30+11:00.")
     if e <= s:
         raise ValueError("The end is not after the start.")
-    return {
-        "start": {"dateTime": s.replace(tzinfo=None).isoformat(timespec="seconds"), "timeZone": tz},
-        "end": {"dateTime": e.replace(tzinfo=None).isoformat(timespec="seconds"), "timeZone": tz},
-    }
+    return {"start": _graph_time(s, tz), "end": _graph_time(e, tz)}
+
+
+def _graph_time(value: dt.datetime, tz: str) -> dict:
+    """A local time goes in as mailbox time; one with an offset (e.g. 'Z' or '+11:00') is
+    converted to UTC, so the offset isn't silently dropped."""
+    if value.tzinfo is None:
+        return {"dateTime": value.isoformat(timespec="seconds"), "timeZone": tz}
+    utc = value.astimezone(dt.timezone.utc).replace(tzinfo=None)
+    return {"dateTime": utc.isoformat(timespec="seconds"), "timeZone": "UTC"}
+
+
+def _overlaps(e: dict, window_start: str, window_end: str) -> bool:
+    """Whether an event (times in mailbox time, as Graph returns them with the Prefer
+    header) falls in [window_start, window_end). Times compare as ISO strings."""
+    start = ((e.get("start") or {}).get("dateTime") or "")[:19]
+    end = ((e.get("end") or {}).get("dateTime") or "")[:19] or start
+    if not start:
+        return True
+    if end <= start:  # zero-length event: in the window if it starts in it
+        return window_start <= start < window_end
+    return start < window_end and end > window_start
 
 
 def _check_show_as(show_as: str) -> str:
@@ -101,16 +122,21 @@ async def list_events(
     if last < first:
         raise ValueError("`end_date` is before `start_date`.")
     tz = await mailbox_time_zone(graph)
+    window_start = f"{first.isoformat()}T00:00:00"
+    window_end = f"{(last + dt.timedelta(days=1)).isoformat()}T00:00:00"
+    # Graph reads a calendarView window with no offset as UTC, whatever the Prefer header says.
+    # Rather than convert the mailbox's (Windows-named) zone to an offset, ask for a day more
+    # each side, get times back in mailbox time, and keep the events in the local window.
     params = {
-        "startDateTime": f"{first.isoformat()}T00:00:00",
-        "endDateTime": f"{(last + dt.timedelta(days=1)).isoformat()}T00:00:00",
+        "startDateTime": f"{(first - dt.timedelta(days=1)).isoformat()}T00:00:00",
+        "endDateTime": f"{(last + dt.timedelta(days=2)).isoformat()}T00:00:00",
         "$select": _EVENT_FIELDS,
         "$orderby": "start/dateTime",
         "$top": "100",
     }
     headers = {"Prefer": f'outlook.timezone="{tz}"'}
-    # Without a timezone on the window, Graph reads it as UTC; ask for it in the mailbox's zone instead.
-    events = await graph.get_all("/me/calendarView", params=params, limit=1000 if query else limit, headers=headers)
+    events = await graph.get_all("/me/calendarView", params=params, limit=1000, headers=headers)
+    events = [e for e in events if _overlaps(e, window_start, window_end)]
     if query:
         q = query.lower()
         events = [e for e in events if q in (e.get("subject") or "").lower()
@@ -135,7 +161,7 @@ async def create_event(
         payload["isReminderOn"] = reminder_minutes >= 0
         if reminder_minutes >= 0:
             payload["reminderMinutesBeforeStart"] = reminder_minutes
-    event = await graph.post("/me/events", json=payload)
+    event = await graph.post("/me/events", json=payload, headers={"Prefer": f'outlook.timezone="{tz}"'})
     return summarise(event)
 
 
@@ -144,7 +170,11 @@ async def update_event(
     all_day: bool | None = None, show_as: str | None = None, location: str | None = None,
     notes: str | None = None,
 ) -> dict:
-    current = await graph.get(f"/me/events/{event_id}", params={"$select": _EVENT_FIELDS})
+    event_id = safe_id(event_id, "event id")
+    tz = await mailbox_time_zone(graph)
+    # Read the event in mailbox time, so times kept from it are labelled correctly below.
+    current = await graph.get(f"/me/events/{event_id}", params={"$select": _EVENT_FIELDS},
+                              headers={"Prefer": f'outlook.timezone="{tz}"'})
     if current.get("attendees"):
         raise ValueError("This event has attendees, and changing it would send them updates. Change it in Outlook.")
     payload: dict = {}
@@ -165,9 +195,9 @@ async def update_event(
             raise ValueError("Give a `start` (and `end`) when switching an event between all-day and timed.")
         new_start = start if start is not None else was["start"]
         new_end = end if end is not None else (None if start is not None and new_all_day else was["end"])
-        tz = await mailbox_time_zone(graph)
         payload.update({"isAllDay": new_all_day, **_times(new_start, new_end, new_all_day, tz)})
     if not payload:
         raise ValueError("Nothing to change.")
-    event = await graph.patch(f"/me/events/{event_id}", json=payload)
+    event = await graph.patch(f"/me/events/{event_id}", json=payload,
+                              headers={"Prefer": f'outlook.timezone="{tz}"'})
     return summarise(event)
