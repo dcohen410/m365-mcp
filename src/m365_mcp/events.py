@@ -31,8 +31,10 @@ def _parse_date(value: str, name: str) -> dt.date:
 
 def _parse_datetime(value: str, name: str) -> dt.datetime:
     try:
-        return dt.datetime.fromisoformat(value)
-    except ValueError:
+        # Python 3.10's fromisoformat doesn't accept a trailing "Z" for UTC.
+        v = value.strip()
+        return dt.datetime.fromisoformat(v[:-1] + "+00:00" if v[-1:] in ("Z", "z") else v)
+    except (ValueError, IndexError):
         raise ValueError(f"`{name}` must be a date and time like 2026-10-16T09:30, not '{value}'.") from None
 
 
